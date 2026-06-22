@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HSE AI - NotebookLM for Safety</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <!-- PDF.js for in-browser PDF parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <!-- Marked for Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        safety: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            900: '#14532d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .tab-active { border-bottom: 2px solid #16a34a; color: #16a34a; font-weight: 600; }
+        .tab-inactive { color: #64748b; }
+        .tab-inactive:hover { color: #334155; }
+        
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #16a34a;
+            width: 24px;
+            height: 24px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden font-sans">
+
+    <!-- Sidebar -->
+    <aside class="w-72 bg-white border-r border-gray-200 flex flex-col z-10 shadow-sm">
+        <div class="h-16 flex items-center px-6 border-b border-gray-200">
+            <i class="ph-fill ph-shield-check text-safety-600 text-3xl mr-3"></i>
+            <h1 class="text-xl font-bold tracking-tight text-gray-900">HSE AI</h1>
+        </div>
+        
+        <div class="p-4">
+            <button onclick="document.getElementById('file-upload').click()" class="w-full bg-safety-600 hover:bg-safety-700 text-white py-2.5 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors font-medium shadow-sm">
+                <i class="ph ph-upload-simple text-lg"></i>
+                Upload Document
+            </button>
+            <input type="file" id="file-upload" accept=".pdf,.txt" class="hidden" onchange="handleFileUpload(event)">
+            <p class="text-xs text-gray-500 mt-2 text-center">PDF or TXT up to 10MB</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-4 pb-4">
+            <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Recent Files</h2>
+            <ul id="document-list" class="space-y-1">
+                <!-- Dynamically populated -->
+                <li class="text-sm text-gray-500 italic px-2 py-1" id="no-docs-msg">No documents uploaded yet.</li>
+            </ul>
+        </div>
+        
+        <div class="p-4 border-t border-gray-200 bg-gray-50">
+            <div class="flex items-center gap-2 text-sm text-gray-600">
+                <i class="ph-fill ph-translate text-gray-400 text-lg"></i>
+                <select id="language-select" class="bg-transparent border-none focus:ring-0 cursor-pointer font-medium text-gray-700 w-full">
+                    <option value="English">English</option>
+                    <option value="Arabic">Arabic (العربية)</option>
+                    <option value="Urdu">Urdu (اردو)</option>
+                </select>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col h-full bg-[#f8fafc]">
+        <!-- Topbar -->
+        <header class="h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-0">
+            <div class="flex items-center gap-2 text-sm font-medium text-gray-500">
+                <span id="current-doc-badge" class="px-3 py-1 bg-gray-100 rounded-full flex items-center gap-2 text-gray-700 border border-gray-200">
+                    <i class="ph ph-file-dashed"></i> No document selected
+                </span>
+            </div>
+            
+            <div class="flex gap-6 border-b-0 h-full items-end" id="feature-tabs">
+                <button onclick="switchTab('summary')" class="tab-active pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5">
+                    <i class="ph ph-file-text text-lg"></i> Smart Summary
+                </button>
+                <button onclick="switchTab('slides')" class="tab-inactive pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5">
+                    <i class="ph ph-presentation-chart text-lg"></i> Slides
+                </button>
+                <button onclick="switchTab('jsa')" class="tab-inactive pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5">
+                    <i class="ph ph-warning-octagon text-lg"></i> JSA / Risk
+                </button>
+                <button onclick="switchTab('checklist')" class="tab-inactive pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5">
+                    <i class="ph ph-list-checks text-lg"></i> Checklist
+                </button>
+                <button onclick="switchTab('qa')" class="tab-inactive pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5">
+                    <i class="ph ph-chat-circle-text text-lg"></i> Ask AI
+                </button>
+            </div>
+        </header>
+
+        <!-- Workspace -->
+        <div class="flex-1 overflow-auto p-8 relative" id="workspace">
+            
+            <!-- Empty State -->
+            <div id="empty-state" class="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
+                <div class="w-20 h-20 bg-safety-50 rounded-full flex items-center justify-center mb-6 border border-safety-100">
+                    <i class="ph-fill ph-hard-hat text-4xl text-safety-500"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">Welcome to HSE AI</h2>
+                <p class="text-gray-500 mb-6">Upload safety manuals, procedures, or incident reports to instantly generate JSAs, checklists, presentations, and summaries.</p>
+                <button onclick="document.getElementById('file-upload').click()" class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 py-2 px-6 rounded-lg font-medium shadow-sm transition-all">
+                    Upload your first document
+                </button>
+            </div>
+
+            <!-- Loader State -->
+            <div id="loading-state" class="hidden flex-col items-center justify-center h-full text-center">
+                <div class="loader mb-4"></div>
+                <h3 class="text-lg font-medium text-gray-700" id="loading-text">Analyzing safety document...</h3>
+                <p class="text-sm text-gray-400 mt-1">Applying HSE guardrails</p>
+            </div>
+
+            <!-- Results Container -->
+            <div id="results-container" class="hidden max-w-5xl mx-auto pb-12">
+                <!-- Action Header -->
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800" id="result-title">Title</h2>
+                    <button id="generate-btn" class="bg-safety-600 hover:bg-safety-700 text-white py-1.5 px-4 rounded-md text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
+                        <i class="ph ph-magic-wand"></i> Generate
+                    </button>
+                </div>
+                
+                <!-- Content Area -->
+                <div id="result-content" class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px]">
+                    <!-- Dynamic content injected here -->
+                </div>
+                
+                <!-- Q&A Interface (Hidden by default) -->
+                <div id="qa-interface" class="hidden flex-col h-[600px] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div id="chat-history" class="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+                        <div class="flex gap-4">
+                            <div class="w-8 h-8 rounded-full bg-safety-100 flex items-center justify-center flex-shrink-0 text-safety-600">
+                                <i class="ph-fill ph-robot"></i>
+                            </div>
+                            <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-4 py-3 text-gray-700 shadow-sm">
+                                Hello! I'm your HSE assistant. Ask me anything about the uploaded document. I will strictly follow safety guidelines.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 bg-white border-t border-gray-200">
+                        <form id="chat-form" onsubmit="handleChatSubmit(event)" class="flex gap-2 relative">
+                            <input type="text" id="chat-input" placeholder="e.g., What PPE is required for confined space entry?" class="flex-1 border border-gray-300 rounded-lg pl-4 pr-12 py-3 focus:outline-none focus:ring-2 focus:ring-safety-500 focus:border-transparent">
+                            <button type="submit" class="absolute right-2 top-2 bottom-2 w-10 flex items-center justify-center bg-safety-600 hover:bg-safety-700 text-white rounded-md transition-colors">
+                                <i class="ph-fill ph-paper-plane-right"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // --- State Management ---
+        const apiKey = ""; // API Key provided by execution environment
+        let documents = [];
+        let currentDocId = null;
+        let currentTab = 'summary';
+        let chatHistory = [];
+
+        // --- Core Prompt Directives (Guardrails) ---
+        const SYSTEM_INSTRUCTION = `
+        You are an expert Health, Safety, and Environment (HSE) AI Assistant. 
+        CRITICAL RULES:
+        1. NO UNSAFE INSTRUCTIONS: Never recommend actions that compromise human safety, health, or the environment.
+        2. STRICT GROUNDING: Answer based ONLY on the provided document text. If the information is not in the text, explicitly state "Information not found in the uploaded document."
+        3. ALWAYS focus on compliance, risk mitigation, and standard safety practices (OSHA, NEBOSH, etc.).
+        `;
+
+        // --- UI Interactions ---
+        function switchTab(tab) {
+            if (!currentDocId && tab !== 'summary') {
+                alert("Please upload and select a document first.");
+                return;
+            }
+            
+            currentTab = tab;
+            
+            // Update UI tabs
+            const tabs = document.getElementById('feature-tabs').children;
+            for (let t of tabs) {
+                t.className = 'tab-inactive pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5';
+            }
+            const activeIndex = ['summary', 'slides', 'jsa', 'checklist', 'qa'].indexOf(tab);
+            tabs[activeIndex].className = 'tab-active pb-4 px-2 flex items-center gap-2 text-sm transition-colors mt-5';
+
+            if (currentDocId) {
+                renderWorkspace();
+            }
+        }
+
+        function renderWorkspace() {
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('results-container').classList.remove('hidden');
+            
+            const contentArea = document.getElementById('result-content');
+            const qaArea = document.getElementById('qa-interface');
+            const generateBtn = document.getElementById('generate-btn');
+            const titleEl = document.getElementById('result-title');
+
+            contentArea.innerHTML = ''; // clear
+
+            if (currentTab === 'qa') {
+                contentArea.classList.add('hidden');
+                generateBtn.classList.add('hidden');
+                qaArea.classList.remove('hidden');
+                qaArea.classList.add('flex');
+                titleEl.innerText = "Document Q&A";
+            } else {
+                contentArea.classList.remove('hidden');
+                qaArea.classList.add('hidden');
+                qaArea.classList.remove('flex');
+                generateBtn.classList.remove('hidden');
+                
+                let title = "";
+                let placeholder = "";
+                
+                switch(currentTab) {
+                    case 'summary':
+                        title = "Smart Summary";
+                        placeholder = "Click Generate to create a comprehensive safety summary of this document.";
+                        generateBtn.onclick = () => generateFeature('summary');
+                        break;
+                    case 'slides':
+                        title = "HSE Presentation Slides";
+                        placeholder = "Click Generate to extract key points into presentation slides.";
+                        generateBtn.onclick = () => generateFeature('slides');
+                        break;
+                    case 'jsa':
+                        title = "Job Safety Analysis (JSA)";
+                        placeholder = "Click Generate to automatically assess hazards, risks, and controls.";
+                        generateBtn.onclick = () => generateFeature('jsa');
+                        break;
+                    case 'checklist':
+                        title = "Safety Checklist";
+                        placeholder = "Click Generate to build an actionable inspection/safety checklist.";
+                        generateBtn.onclick = () => generateFeature('checklist');
+                        break;
+                }
+                
+                titleEl.innerText = title;
+                contentArea.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-64 text-gray-400">
+                        <i class="ph ph-magic-wand text-4xl mb-3 opacity-50"></i>
+                        <p>${placeholder}</p>
+                    </div>`;
+            }
+        }
+
+        // --- File Handling (PDF & TXT) ---
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            showLoader(`Parsing ${file.name}...`);
+            
+            try {
+                let text = "";
+                if (file.type === "application/pdf") {
+                    text = await extractTextFromPDF(file);
+                } else {
+                    text = await file.text();
+                }
+
+                // Chunk/truncate if too massive for quick MVP API call (limit ~100k chars for safety)
+                if (text.length > 100000) {
+                    text = text.substring(0, 100000) + "\n\n[DOCUMENT TRUNCATED FOR MVP PREVIEW]";
+                }
+
+                const doc = {
+                    id: Date.now().toString(),
+                    name: file.name,
+                    text: text,
+                    date: new Date().toLocaleDateString()
+                };
+
+                documents.push(doc);
+                selectDocument(doc.id);
+                updateSidebar();
+
+            } catch (error) {
+                console.error("Error reading file:", error);
+                alert("Failed to read the file. Ensure it's a valid PDF or Text file.");
+            } finally {
+                hideLoader();
+            }
+            
+            // Reset input
+            event.target.value = '';
+        }
+
+        async function extractTextFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+            let text = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                const strings = content.items.map(item => item.str);
+                text += strings.join(" ") + "\n";
+            }
+            return text;
+        }
+
+        function updateSidebar() {
+            const list = document.getElementById('document-list');
+            document.getElementById('no-docs-msg')?.remove();
+            
+            list.innerHTML = '';
+            documents.forEach(doc => {
+                const li = document.createElement('li');
+                const isSelected = doc.id === currentDocId;
+                li.className = `cursor-pointer px-3 py-2 rounded-md flex items-center gap-2 text-sm ${isSelected ? 'bg-safety-50 text-safety-700 font-medium border border-safety-200' : 'text-gray-600 hover:bg-gray-100 border border-transparent'}`;
+                li.onclick = () => selectDocument(doc.id);
+                li.innerHTML = `
+                    <i class="ph ${isSelected ? 'ph-file-text' : 'ph-file'} text-lg"></i>
+                    <span class="truncate flex-1">${doc.name}</span>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        function selectDocument(id) {
+            currentDocId = id;
+            const doc = documents.find(d => d.id === id);
+            
+            // Update Badge
+            const badge = document.getElementById('current-doc-badge');
+            badge.innerHTML = `<i class="ph-fill ph-file-pdf text-red-500"></i> <span class="truncate max-w-[200px]">${doc.name}</span>`;
+            badge.className = "px-3 py-1 bg-white rounded-full flex items-center gap-2 text-gray-800 border border-gray-200 shadow-sm font-medium";
+            
+            updateSidebar();
+            
+            // Reset QA history for new doc
+            chatHistory = [];
+            const chatBox = document.getElementById('chat-history');
+            if(chatBox) {
+                chatBox.innerHTML = `
+                    <div class="flex gap-4">
+                        <div class="w-8 h-8 rounded-full bg-safety-100 flex items-center justify-center flex-shrink-0 text-safety-600">
+                            <i class="ph-fill ph-robot"></i>
+                        </div>
+                        <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-4 py-3 text-gray-700 shadow-sm">
+                            Document loaded: <strong>${doc.name}</strong>. Ask me anything about it!
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderWorkspace();
+        }
+
+        // --- Loading States ---
+        function showLoader(text = "Processing...") {
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('results-container').classList.add('hidden');
+            const loader = document.getElementById('loading-state');
+            loader.classList.remove('hidden');
+            loader.classList.add('flex');
+            document.getElementById('loading-text').innerText = text;
+        }
+
+        function hideLoader() {
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('loading-state').classList.remove('flex');
+        }
+
+        // --- API & Core Generation Logic ---
+        async function fetchGemini(prompt, schema = null) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+                generationConfig: {
+                    temperature: 0.2 // Low temp for factual safety data
+                }
+            };
+
+            if (schema) {
+                payload.generationConfig.responseMimeType = "application/json";
+                payload.generationConfig.responseSchema = schema;
+            }
+
+            // Exponential backoff retry
+            const retries = [1000, 2000, 4000, 8000];
+            for (let i = 0; i <= retries.length; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    
+                    const data = await response.json();
+                    return data.candidates[0].content.parts[0].text;
+                } catch (error) {
+                    if (i === retries.length) throw error;
+                    await new Promise(r => setTimeout(r, retries[i]));
+                }
+            }
+        }
+
+        async function generateFeature(featureType) {
+            const doc = documents.find(d => d.id === currentDocId);
+            if (!doc) return;
+
+            const lang = document.getElementById('language-select').value;
+            const langPrompt = `Output the response strictly in ${lang} language.`;
+
+            showLoader(`Generating ${featureType}...`);
+            const contentArea = document.getElementById('result-content');
+
+            try {
+                if (featureType === 'summary') {
+                    const prompt = `
+                        Analyze the following safety document.
+                        Provide a comprehensive response formatted in Markdown with these specific sections:
+                        1. **Simple Summary**: High-level overview (1-2 paragraphs).
+                        2. **Technical Summary**: Detailed HSE technical points.
+                        3. **Key Points**: Bulleted list of critical takeaways.
+                        4. **Required Actions / Compliance Requirements**: What must be done based on this doc.
+                        
+                        ${langPrompt}
+                        
+                        --- DOCUMENT CONTEXT ---
+                        ${doc.text}
+                    `;
+                    
+                    const result = await fetchGemini(prompt);
+                    contentArea.innerHTML = `<div class="prose max-w-none text-gray-700">${marked.parse(result)}</div>`;
+                } 
+                else if (featureType === 'slides') {
+                    const schema = {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                title: { type: "STRING", description: "Slide title" },
+                                content: { type: "ARRAY", items: { type: "STRING" }, description: "3-5 bullet points" },
+                                type: { type: "STRING", description: "Either 'Title Slide', 'Content', or 'Summary'" }
+                            },
+                            required: ["title", "content", "type"]
+                        }
+                    };
+                    const prompt = `Convert this safety document into presentation slides. Focus on Hazards, Controls, PPE, and Procedures. ${langPrompt}\n\nDocument:\n${doc.text}`;
+                    
+                    const resultStr = await fetchGemini(prompt, schema);
+                    const slides = JSON.parse(resultStr);
+                    
+                    let html = `<div class="grid grid-cols-1 md:grid-cols-2 gap-6">`;
+                    slides.forEach((slide, index) => {
+                        const bullets = slide.content.map(c => `<li class="mb-2 flex items-start"><i class="ph-fill ph-caret-right text-safety-500 mt-1 mr-2 flex-shrink-0"></i> <span>${c}</span></li>`).join('');
+                        html += `
+                            <div class="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col aspect-[4/3]">
+                                <div class="bg-gray-50 border-b border-gray-200 px-4 py-3 flex justify-between items-center">
+                                    <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Slide ${index + 1}</span>
+                                    <span class="text-xs text-safety-600 bg-safety-50 px-2 py-1 rounded-md font-medium border border-safety-100">${slide.type}</span>
+                                </div>
+                                <div class="p-6 flex-1 flex flex-col">
+                                    <h3 class="text-xl font-bold text-gray-800 mb-4 pb-2 border-b border-gray-100">${slide.title}</h3>
+                                    <ul class="text-gray-600 text-sm flex-1 overflow-y-auto pr-2">${bullets}</ul>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += `</div>`;
+                    contentArea.innerHTML = html;
+                }
+                else if (featureType === 'jsa') {
+                    const schema = {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                step: { type: "STRING", description: "Task Step" },
+                                hazard: { type: "STRING", description: "Potential Hazard" },
+                                risk: { type: "STRING", description: "Risk level (High/Med/Low)" },
+                                control: { type: "STRING", description: "Control Measure" },
+                                ppe: { type: "STRING", description: "Required PPE" }
+                            },
+                            required: ["step", "hazard", "risk", "control", "ppe"]
+                        }
+                    };
+                    const prompt = `Create a detailed Job Safety Analysis (JSA) / Risk Assessment from this document. ${langPrompt}\n\nDocument:\n${doc.text}`;
+                    
+                    const resultStr = await fetchGemini(prompt, schema);
+                    const jsaItems = JSON.parse(resultStr);
+                    
+                    let html = `
+                        <div class="overflow-x-auto rounded-lg border border-gray-200 shadow-sm">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Job Step</th>
+                                        <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Hazard</th>
+                                        <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Risk Level</th>
+                                        <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Control Measure</th>
+                                        <th class="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">PPE Required</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                    `;
+                    
+                    jsaItems.forEach(item => {
+                        const riskColor = item.risk.toLowerCase().includes('high') ? 'bg-red-100 text-red-800 border-red-200' : 
+                                        item.risk.toLowerCase().includes('med') ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 
+                                        'bg-green-100 text-green-800 border-green-200';
+                        html += `
+                            <tr class="hover:bg-gray-50 transition-colors">
+                                <td class="px-6 py-4 text-sm text-gray-900 font-medium">${item.step}</td>
+                                <td class="px-6 py-4 text-sm text-red-600 font-medium">${item.hazard}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <span class="px-2.5 py-1 inline-flex text-xs leading-5 font-semibold rounded-full border ${riskColor}">${item.risk}</span>
+                                </td>
+                                <td class="px-6 py-4 text-sm text-safety-700">${item.control}</td>
+                                <td class="px-6 py-4 text-sm text-gray-600">${item.ppe}</td>
+                            </tr>
+                        `;
+                    });
+                    html += `</tbody></table></div>`;
+                    contentArea.innerHTML = html;
+                }
+                else if (featureType === 'checklist') {
+                    const schema = {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                category: { type: "STRING" },
+                                items: { type: "ARRAY", items: { type: "STRING" } }
+                            },
+                            required: ["category", "items"]
+                        }
+                    };
+                    const prompt = `Create an actionable site inspection and PPE checklist based on this document. Group into logical categories. ${langPrompt}\n\nDocument:\n${doc.text}`;
+                    
+                    const resultStr = await fetchGemini(prompt, schema);
+                    const checklist = JSON.parse(resultStr);
+                    
+                    let html = `<div class="space-y-8">`;
+                    checklist.forEach(section => {
+                        html += `
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-800 mb-4 border-b border-gray-200 pb-2 flex items-center gap-2">
+                                    <i class="ph-fill ph-check-square text-safety-500"></i> ${section.category}
+                                </h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pl-2">
+                        `;
+                        section.items.forEach(item => {
+                            html += `
+                                <label class="flex items-start gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors">
+                                    <input type="checkbox" class="mt-1 w-5 h-5 text-safety-600 rounded border-gray-300 focus:ring-safety-500">
+                                    <span class="text-sm text-gray-700 leading-snug">${item}</span>
+                                </label>
+                            `;
+                        });
+                        html += `</div></div>`;
+                    });
+                    html += `</div>`;
+                    contentArea.innerHTML = html;
+                }
+
+            } catch (error) {
+                console.error(error);
+                contentArea.innerHTML = `
+                    <div class="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 flex flex-col items-center text-center">
+                        <i class="ph-fill ph-warning-circle text-3xl mb-2"></i>
+                        <p class="font-bold">Error generating content</p>
+                        <p class="text-sm mt-1">Make sure you are connected to the internet. API limits may have been reached.</p>
+                    </div>`;
+            } finally {
+                hideLoader();
+                renderWorkspace(); // re-show content
+            }
+        }
+
+        // --- Q&A Logic ---
+        async function handleChatSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const question = input.value.trim();
+            if (!question) return;
+
+            const doc = documents.find(d => d.id === currentDocId);
+            if (!doc) return;
+
+            // Add user msg to UI
+            appendChatMessage(question, 'user');
+            input.value = '';
+            
+            // Add loading bot msg
+            const typingId = 'typing-' + Date.now();
+            appendChatMessage('<div class="flex gap-1"><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></span><span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></span></div>', 'bot', typingId);
+
+            try {
+                const lang = document.getElementById('language-select').value;
+                const prompt = `
+                    User Question: ${question}
+                    
+                    Respond strictly based on the following document context.
+                    If the answer requires citing a section, mention it.
+                    If the answer is not in the text, say "I cannot find this information in the uploaded document."
+                    Answer in ${lang}.
+                    
+                    --- CONTEXT ---
+                    ${doc.text}
+                `;
+
+                const result = await fetchGemini(prompt);
+                
+                // Remove typing indicator
+                document.getElementById(typingId)?.remove();
+                
+                // Add actual response
+                appendChatMessage(marked.parse(result), 'bot');
+
+            } catch (error) {
+                document.getElementById(typingId)?.remove();
+                appendChatMessage("<span class='text-red-500'>Sorry, I encountered an error analyzing the document.</span>", 'bot');
+            }
+        }
+
+        function appendChatMessage(text, sender, id = null) {
+            const chatBox = document.getElementById('chat-history');
+            const div = document.createElement('div');
+            if (id) div.id = id;
+            div.className = "flex gap-4 " + (sender === 'user' ? "flex-row-reverse" : "");
+            
+            if (sender === 'user') {
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center flex-shrink-0 text-white">
+                        <i class="ph-fill ph-user"></i>
+                    </div>
+                    <div class="bg-gray-800 text-white rounded-2xl rounded-tr-none px-4 py-3 shadow-sm text-sm max-w-[80%]">
+                        ${text}
+                    </div>
+                `;
+            } else {
+                div.innerHTML = `
+                    <div class="w-8 h-8 rounded-full bg-safety-100 flex items-center justify-center flex-shrink-0 text-safety-600">
+                        <i class="ph-fill ph-robot"></i>
+                    </div>
+                    <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none px-4 py-3 text-gray-800 shadow-sm text-sm max-w-[80%] prose prose-sm">
+                        ${text}
+                    </div>
+                `;
+            }
+            
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+    </script>
+</body>
+</html>
